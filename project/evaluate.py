@@ -8,7 +8,7 @@ import mcubes
 import trimesh
 import argparse
 
-from model9 import PointCloudVAE 
+from model import PointCloudVAE 
 
 def evaluate(args):
     """
@@ -145,4 +145,5 @@ if __name__ == '__main__':
     parser.add_argument('--num_fourier_freqs', type=int, default=8, help='傅里葉特徵的頻率數量')
     args = parser.parse_args()
     
+
     evaluate(args)
