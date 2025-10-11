@@ -8,8 +8,8 @@ import argparse
 import re 
 from schedulers import WarmupCosineScheduler
 
-from model9 import PointCloudVAE 
-from dataset4 import SDFDataset   
+from model import PointCloudVAE 
+from dataset import SDFDataset   
 
 # --- 1. 命令行參數 ---
 parser = argparse.ArgumentParser(description='Triplane-VAE 訓練腳本')
@@ -141,3 +141,4 @@ for epoch in range(start_epoch, args.epochs):
         print(f"Checkpoint 已保存至: {save_path}")
 
 print("訓練完成！")
+
