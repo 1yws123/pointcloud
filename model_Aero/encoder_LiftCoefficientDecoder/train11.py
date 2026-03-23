@@ -1,4 +1,9 @@
 import os
+
+# --- 环境配置 ---
+# 建议在命令行中指定显卡，或者在这里统一管理
+os.environ["CUDA_VISIBLE_DEVICES"] = "4,5"
+
 import csv
 import argparse
 import torch
@@ -9,8 +14,9 @@ from torch.utils.data import DataLoader, random_split
 import numpy as np
 from schedulers import WarmupCosineScheduler
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # 导入你的模块
-from model6 import PointCloudVAE
+from model10 import PointCloudVAE
 from dataset import SDFDataset
 
 import random
@@ -22,23 +28,18 @@ np.random.seed(seed)
 random.seed(seed)
 torch.backends.cudnn.deterministic = True
 
-# --- 环境配置 ---
-# 建议在命令行中指定显卡，或者在这里统一管理
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 def get_args():
     parser = argparse.ArgumentParser(description='PhysGen Style: Lift Coefficient Decoder Training')
     # 路径配置
     parser.add_argument('--pc_root', type=str, default='/home/yuwenshi/B737/B737_1299/G58_pc_1299/pointcloud')
     parser.add_argument('--aero_root', type=str, default='/home/yuwenshi/B737/B737_1299/G58_aero_1299/G58_aero_1299')
     parser.add_argument('--sdf_dir', type=str, default='/home/yuwenshi/B737/B737_1299/sdf_data')
-    parser.add_argument('--save_dir', type=str, default='/home/yuwenshi/B737/model_Aero/encoder_LiftCoefficientDecoder/checkpoints_9')
+    parser.add_argument('--save_dir', type=str, default='/home/yuwenshi/B737/model_Aero/encoder_LiftCoefficientDecoder/checkpoints_11')
 
-    parser.add_argument('--pretrained_path', type=str, default='/home/yuwenshi/B737/checkpoint_all_2/vae_epoch_16400.pth', help='预训练好的几何VAE权重路径')
+    parser.add_argument('--pretrained_path', type=str, default='/home/yuwenshi/B737/checkpoint_all_3(增加数据集)/vae_extended_epoch_17400.pth', help='预训练好的几何VAE权重路径')
     
     # 训练超参数
-    parser.add_argument('--epochs', type=int, default=2000)
+    parser.add_argument('--epochs', type=int, default=2500)
     parser.add_argument('--batch_size', type=int, default=120)
     parser.add_argument('--lr', type=float, default=1e-4, help='学习率')
     parser.add_argument('--val_split', type=float, default=0.2, help='验证集比例')
@@ -89,8 +90,8 @@ def main():
     val_size = len(full_dataset) - train_size
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=8, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=8, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
     # 2. 初始化模型并加载权重
     model = PointCloudVAE(
@@ -114,14 +115,12 @@ def main():
         print(f"Using {torch.cuda.device_count()} GPUs for training.")
         model = nn.DataParallel(model)
     
-    # 3. 冻结策略：解冻 Encoder 和 AeroDecoder，但锁定几何重建分支（不浪费算力）
+    # 3. 冻结 Encoder，但锁定几何重建分支（不浪费算力）
     for name, param in model.named_parameters():
-        if "decoder" in name or "sdf_head" in name: 
-            # 注意：这里的 "decoder" 是指 TriplaneDecoder
-            param.requires_grad = False
+        if "aero_decoder" in name:
+            param.requires_grad = True
         else:
-            # 这样 encoder, fourier_embedder 和 aero_decoder 都会参与训练
-            param.requires_grad = True 
+            param.requires_grad = False 
 
     # 4. 优化器 (只传入 requires_grad=True 的参数)
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr,weight_decay=1e-3)
@@ -148,6 +147,25 @@ def main():
         for i, batch in enumerate(train_loader):
             points = batch['point_cloud'].to(DEVICE)
             cl_gt_norm = batch['aero_label'][:, 0].to(DEVICE).float().view(-1, 1)
+            # 数据增强 (Physics-Safe Data Augmentation) 
+            # =================================================================
+            B, N, _ = points.shape
+            
+            # 1. 点云随机打乱 (Point Shuffling)
+            # 改变输入顺序，使得底层冻结的 FPS 采出不同的骨架，产生特征级别的微小扰动
+            idx_shuffle = torch.randperm(N, device=DEVICE)
+            points = points[:, idx_shuffle, :]
+            
+            # 2. 点云随机遮蔽 (Point Dropout)
+            # 随机遮蔽 5% 的点（用第0个点覆盖，不改变物理外形）
+            drop_ratio = 0.05
+            drop_num = int(N * drop_ratio)
+            
+            drop_indices = torch.randint(0, N, (B, drop_num), device=DEVICE)
+            batch_indices = torch.arange(B, device=DEVICE).unsqueeze(1).expand(B, drop_num)
+            
+            points[batch_indices, drop_indices, :] = points[:, 0:1, :]
+            # =================================================================
 
             optimizer.zero_grad()
             
