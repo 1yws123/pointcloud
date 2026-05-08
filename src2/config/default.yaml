@@ -1,0 +1,49 @@
+# ===================================================================
+# encoder_new / Aero 分支 —— 默认超参配置
+# 使用：python -m src.train --config src/config/default.yaml [其他 CLI 覆盖]
+#      不传 --config 时等价于用本文件的所有值（与 argparse 默认值保持一致）。
+# CLI 参数优先级最高，其次 YAML，最后 argparse 内置默认值。
+#nohup python -u -m src.train --config src/config/default.yaml > train4.log 2>&1 &
+# ===================================================================
+
+# --------- 路径 ---------
+pc_root:    /home/yuwenshi/B737/B737_1299/pc2
+aero_root:  /home/yuwenshi/B737/B737_1299/G58_aero_1299/G58_aero_1299
+sdf_dir:    /home/yuwenshi/B737/B737_1299/sdf1
+save_dir:   /home/yuwenshi/B737/model_Aero/encoder_new/checkpoints_34(900个数据)
+ckpt_path:  /home/yuwenshi/B737/model_Aero/encoder_new/checkpoints_34(900个数据)/best_cl_model.pth
+
+# --------- 训练控制 ---------
+epochs:           2000
+batch_size:       32        #2^n
+lr:               0.0003      # 1e-4  ⭐  0.001
+weight_decay:     0.0005       # 1e-3 ⭐  0.0001
+val_split:        0.2
+eval_interval:    10
+plot_interval:    50
+checkpoint_interval: 200
+seed:             42
+num_workers:      0
+train_gpu:        "2"
+eval_gpu:         "2"
+
+# --------- 正则与早停（核心抗过拟合） ---------
+kl_beta:             0.00   # β·KL 正则，让 logvar 真正起作用      ⭐极小
+jitter_std:          0.001    # 训练时点云 jitter（原先 1e-4 形同虚设） 0.001 ⭐
+early_stop_patience: 200       # val_mae 连续 N 次 eval 无改善就停；0=关闭
+
+# --------- 数据增强（物理无损） ---------
+mirror_prob:   0.5   # XZ 对称飞机 + β=0 直飞，CL/CD 不变
+point_dropout: 0.0   # 点 dropout 概率（>0 时启用）
+
+# --------- 模型结构 ---------
+model:
+  latent_dim:          128    #128⭐
+  plane_resolution:    128
+  plane_features:      32
+  num_fourier_freqs:   2    #⭐
+  # 对齐 Hunyuan3D 体量（2048 + 2048 + 4096 = 8192），细节分支占 50%
+  num_points_uniform:     3072
+  num_points_curvature:   4096
+  num_points_importance:  3072
+  dropout:                0.1  # encoder 内部 dropout 强度⭐
